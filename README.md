@@ -7,6 +7,7 @@
 1. **Detect**: Automatically analyze the system environment (BIOS VT-x/SVM, OS Build, WMI health) and current security feature states.
 2. **Control**: Safely disable tightly integrated Windows security features (VBS, HVCI, Credential Guard, Meltdown mitigations, Windows Hyper-V).
 3. **Manage State**: Keep track of every modification made to the system registry, Boot Configuration Data (BCD), and services to allow for precise "Revert Changes" operations.
+4. **Graphical Interface**: Utilize **NiceGUI** to provide a seamless, browser-based graphical user interface that feels native and responsive.
 
 ## 🖥️ Key UI Screens & Components Needed
 
