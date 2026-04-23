@@ -1,6 +1,6 @@
 # 🚀 HyperGuardV2
 
-> This application is a modern graphical interface for managing Windows 11 Virtualization-Based Security (VBS) features. It natively implements the logic previously handled by `VBS.cmd`, allowing users to easily toggle security features via a Python-based CLI/GUI.
+> This application is a modern graphical interface for managing Windows 11 Virtualization-Based Security (VBS) features. It natively implements the logic previously handled by `VBS_1.6.2.cmd`, allowing users to easily toggle security features via a Python-based CLI/GUI.
 
 ---
 
