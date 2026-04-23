@@ -22,6 +22,7 @@
 │   ├── __init__.py            # Marks the directory as a Python package
 │   ├── __main__.py            # Main entry point (run with `python -m src`)
 │   ├── cli.py                 # Command-line argument parsing and setup
+│   ├── gui.py                 # NiceGUI interface components and layout
 │   ├── config.py              # Configuration schemas and management
 │   ├── services/              # Core business logic and orchestration
 │   │   ├── __init__.py
@@ -54,8 +55,9 @@
 
 ### `src/`
 The root module of the executable.
-- **`__main__.py`**: Contains the standard `if __name__ == "__main__":` block. Avoid placing business logic here. It should import `cli.py` to parse arguments and execute the application.
+- **`__main__.py`**: Contains the standard `if __name__ == "__main__":` block. Avoid placing business logic here. It should import `cli.py` or `gui.py` depending on the execution mode.
 - **`cli.py`**: Handles user input using `argparse`, `click`, or `typer`.
+- **`gui.py`**: Handles the graphical user interface using `NiceGUI`.
 - **`config.py`**: Centralized configuration management using `pydantic-settings` or built-in `dataclasses` reading from the environment.
 
 ### `src/services/`

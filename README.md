@@ -26,8 +26,17 @@
 
 3. Run the application:
    ```bash
+   # Run the CLI
+   python -m src --help
+
+   # Run the GUI (Default)
    python -m src
    ```
+
+---
+
+## 🎨 User Interface
+HyperGuardV2 features a modern, reactive web-based UI powered by **NiceGUI**. For more information on how the UI is structured, see [.context/STRUCTURE.md](.context/STRUCTURE.md).
 
 ---
 

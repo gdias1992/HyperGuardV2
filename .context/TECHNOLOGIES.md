@@ -9,6 +9,7 @@
 | Status | Category | Technology | Version | Purpose | Documentation |
 |------:|----------|------------|---------|---------|---------------|
 | ✅ | Language | Python | 3.14 | Main programming language | https://docs.python.org/3/ |
+| ✅ | UI Framework | NiceGUI | Latest | Modern Python-based web UI | https://nicegui.io/ |
 | ✅ | OS Interface | pywin32 | Latest | Python Win32 extensions for Windows API access | https://github.com/mhammond/pywin32 |
 
 ---
