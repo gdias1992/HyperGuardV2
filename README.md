@@ -26,6 +26,26 @@ A detailed list or grid displaying the 14 core features managed by the app. Each
 - **Toggle/Action Button**: Individual controls to manage the feature.
 - **Tooltip/Info Icon**: Hovering over a feature should briefly explain what it does (e.g., "HVCI: Prevents unsigned drivers from loading").
 
+#### 📋 Managed Features List
+The application interacts with the following system components:
+
+| # | Feature | Targeted Value | Scope | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **01** | **Virtualization (VT-x/SVM)** | **Enabled** | BIOS | Mandatory prerequisite. App fails if disabled in BIOS. |
+| **02** | **WMI (WinMgmt)** | **Functional** | System | Used for queries. Includes a "Troubleshoot" fix if broken. |
+| **03** | **VBS (Virtualization-Based Security)** | **Disabled** | Registry/UEFI | The primary target. Disables the core security engine. |
+| **04** | **HVCI (Memory Integrity)** | **Disabled** | Registry/UEFI | Disables kernel-mode code integrity checks. |
+| **05** | **Credential Guard** | **Disabled** | Registry/UEFI | Disables LSA isolation. |
+| **06** | **DSE (Driver Signature Enforcement)** | **Disabled** | Boot | Disabled via "Startup Settings" (F7) for one boot cycle. |
+| **07** | **KVA Shadow (Meltdown Fix)** | **Disabled** | Registry | Disables syscall isolation (often required for hooks). |
+| **08** | **Windows Hypervisor** | **Disabled** | BCD | Switches `hypervisorlaunchtype` to `off`. |
+| **09** | **FACEIT Anti-Cheat** | **Disabled** | Service | Stops and disables services that block unsigned drivers. |
+| **10** | **Windows Hello Protection** | **Removed** | Registry/TPM | Removes VBS-based isolation for PIN/Biometrics. |
+| **11** | **Secure Biometrics** | **Disabled** | Registry | Disables enhanced sign-in security features. |
+| **12** | **HyperGuard / System Guard** | **Disabled** | Registry | Disables SMM and boot integrity protections. |
+| **13** | **Smart App Control** | **Monitor** | Registry | Notifies user if SAC might block the tool. |
+| **14** | **BitLocker** | **Suspended** | System | Momentarily suspended to allow advanced boot options. |
+
 ### 3. ⚠️ Warning Modals & Action Flows
 - **BitLocker Intervention**: A modal that appears to warn users that BitLocker will be temporarily suspended to change boot parameters.
 - **Windows Hello Reset**: A critical dialog warning that biometric fingerprints and PINs will be reset if VBS is disabled, requiring the user to type their fallback password next login.
@@ -37,7 +57,7 @@ A detailed list or grid displaying the 14 core features managed by the app. Each
 
 ## 🎨 Design System & Aesthetic Preferences
 - **Style**: Modern Windows 11 (Mica/Fluent design) infused with a "power-user / developer" visual language. 
-- **Theme**: Premium Dark Mode by default.
+- **Theme**: **Mandatory Dark Mode**. The application must launch in and exclusively use a dark theme to align with its power-user utility profile.
 - **Color Palette Ideas**: 
   - Deep dark backgrounds (slate/charcoal).
   - Status colors: Cyber-blue (info), Success Green (enabled/safe), Warning Amber (modifications needed), Alert Red (critical locks/BitLocker).
