@@ -18,22 +18,22 @@ The script follows a structured workflow:
 
 The script interacts with the following system components:
 
-| Feature | Targeted Value | Scope | Description |
-| :--- | :--- | :--- | :--- |
-| **Virtualization (VT-x/SVM)** | **Enabled** | BIOS | Mandatory prerequisite. Script fails if disabled in BIOS. |
-| **WMI (WinMgmt)** | **Functional** | System | Used for queries. Includes a "Troubleshoot" fix if broken. |
-| **VBS (Virtualization-Based Security)** | **Disabled** | Registry/UEFI | The primary target. Disables the core security engine. |
-| **HVCI (Memory Integrity)** | **Disabled** | Registry/UEFI | Disables kernel-mode code integrity checks. |
-| **Credential Guard** | **Disabled** | Registry/UEFI | Disables LSA isolation. |
-| **DSE (Driver Signature Enforcement)** | **Disabled** | Boot | Disabled via "Startup Settings" (F7) for one boot cycle. |
-| **KVA Shadow (Meltdown Fix)** | **Disabled** | Registry | Disables syscall isolation (often required for hooks). |
-| **Windows Hypervisor** | **Disabled** | BCD | Switches `hypervisorlaunchtype` to `off`. |
-| **FACEIT Anti-Cheat** | **Disabled** | Service | Stops and disables services that block unsigned drivers. |
-| **Windows Hello Protection** | **Removed** | Registry/TPM | Removes VBS-based isolation for PIN/Biometrics. |
-| **Secure Biometrics** | **Disabled** | Registry | Disables enhanced sign-in security features. |
-| **HyperGuard / System Guard** | **Disabled** | Registry | Disables SMM and boot integrity protections. |
-| **Smart App Control** | **Monitor** | Registry | Notifies user if SAC might block the tool. |
-| **BitLocker** | **Suspended** | System | Momentarily suspended to allow advanced boot options. |
+| # | Feature | Targeted Value | Scope | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **01** | **Virtualization (VT-x/SVM)** | **Enabled** | BIOS | Mandatory prerequisite. Script fails if disabled in BIOS. |
+| **02** | **WMI (WinMgmt)** | **Functional** | System | Used for queries. Includes a "Troubleshoot" fix if broken. |
+| **03** | **VBS (Virtualization-Based Security)** | **Disabled** | Registry/UEFI | The primary target. Disables the core security engine. |
+| **04** | **HVCI (Memory Integrity)** | **Disabled** | Registry/UEFI | Disables kernel-mode code integrity checks. |
+| **05** | **Credential Guard** | **Disabled** | Registry/UEFI | Disables LSA isolation. |
+| **06** | **DSE (Driver Signature Enforcement)** | **Disabled** | Boot | Disabled via "Startup Settings" (F7) for one boot cycle. |
+| **07** | **KVA Shadow (Meltdown Fix)** | **Disabled** | Registry | Disables syscall isolation (often required for hooks). |
+| **08** | **Windows Hypervisor** | **Disabled** | BCD | Switches `hypervisorlaunchtype` to `off`. |
+| **09** | **FACEIT Anti-Cheat** | **Disabled** | Service | Stops and disables services that block unsigned drivers. |
+| **10** | **Windows Hello Protection** | **Removed** | Registry/TPM | Removes VBS-based isolation for PIN/Biometrics. |
+| **11** | **Secure Biometrics** | **Disabled** | Registry | Disables enhanced sign-in security features. |
+| **12** | **HyperGuard / System Guard** | **Disabled** | Registry | Disables SMM and boot integrity protections. |
+| **13** | **Smart App Control** | **Monitor** | Registry | Notifies user if SAC might block the tool. |
+| **14** | **BitLocker** | **Suspended** | System | Momentarily suspended to allow advanced boot options. |
 
 ---
 
@@ -107,31 +107,39 @@ The script interacts with the following system components:
 *   **Detection**: `fltmc` (Filter Manager Control) is checked for the string "FACEIT".
 *   **Disabling Action**: Stops the `FACEIT` and `FACEITService` services and sets their start type to `Disabled`.
 
-### 10. Windows Hello Protection & Secure Biometrics
+### 10. Windows Hello Protection
 *   **Detailed Explanation**: Windows Hello uses VBS to protect biometric data (fingerprints, face) and PINs inside the secure enclave. If you disable VBS while this is active, the system may lose access to the keys, causing login failures.
 *   **Detection**: Registry query at `HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\WindowsHello \ Enabled`.
 *   **Handling**: Uses `certutil -DeleteHelloContainer` to remove the protected PIN/Biometric container before disabling VBS, forcing the user to use a password until it's reset.
 
-### 11. HyperGuard & System Guard
-*   **Detailed Explanation**: HyperGuard (kernel protection) and System Guard (boot integrity) use VBS and SMM (System Management Mode) to ensure the system hasn't been tampered with since boot. They monitor various system registers and memory structures.
+### 11. Secure Biometrics
+*   **Detailed Explanation**: Enhanced Sign-in Security (Secure Biometrics) uses VBS to protect biometric templates and the communication channel between the sensor and the OS.
+*   **Detection**: Checks multiple registry variations:
+    1.  `HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\SecureBiometrics \ Enabled`.
+    2.  `HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios \ SecureBiometrics`.
+    3.  `HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\WindowsHelloSecureBiometrics \ Enabled`.
+*   **Disabling Action**: Sets the found registry values to `0`.
+
+### 12. HyperGuard & System Guard
+*   **Detailed Explanation**: HyperGuard (kernel protection) and System Guard (boot integrity) use VBS and SMM (System Management Mode) to ensure the system hasn't been tampered with since boot.
 *   **Detection**: 
-    1.  **HyperGuard**: Registry query at `HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HyperGuard \ Enabled`.
-    2.  **System Guard**: Registry query at `HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\SystemGuard \ Enabled`.
-    3.  **Guarded Host**: Registry query at `HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\Host-Guardian \ Enabled`.
+    1.  **HyperGuard**: `HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HyperGuard \ Enabled`.
+    2.  **System Guard**: `HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\SystemGuard \ Enabled`.
+    3.  **Guarded Host**: `HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\Host-Guardian \ Enabled`.
 *   **Disabling Action**: Sets the `Enabled` value of these scenarios to `0`.
 
-### 12. Smart App Control (SAC)
-*   **Detailed Explanation**: An AI-powered security layer in Windows 11 that blocks apps that are malicious or untrusted (not digitally signed or with low reputation).
+### 13. Smart App Control (SAC)
+*   **Detailed Explanation**: An AI-powered security layer in Windows 11 that blocks apps that are malicious or untrusted.
 *   **Detection**: Registry query at `HKLM\SYSTEM\CurrentControlSet\Control\CI\Policy \ VerifiedAndReputablePolicyState`.
 *   **Status Indicators**: 
-    *   `0x1`: **Enabled** (Blocks unsigned/unknown apps).
-    *   `0x2`: **Evaluation Mode** (System is "learning" and might enable itself later).
-*   **Action**: Notification only. The script does not automatically disable SAC as it requires a manual user toggle in Windows Security or a clean install to reset.
+    *   `0x1`: **Enabled**.
+    *   `0x2`: **Evaluation Mode**.
+*   **Action**: Notification only.
 
-### 13. BitLocker Management
-*   **Detailed Explanation**: Windows full-disk encryption. If you change boot parameters (like BCD entries), BitLocker may suspect tampering and request a "Recovery Key".
+### 14. BitLocker Management
+*   **Detailed Explanation**: Windows full-disk encryption. Suspension is required to change boot parameters without triggering recovery mode.
 *   **Detection**: `(Get-BitLockerVolume -MountPoint $env:SystemDrive).ProtectionStatus`.
-*   **Handling**: Temporarily suspends protectors using `manage-bde -protectors -disable C: -rebootcount 1`. This allows the BCD change and reboot into "Startup Settings" without a recovery prompt.
+*   **Handling**: Temporarily suspends protectors using `manage-bde -protectors -disable C: -rebootcount 1`.
 
 ---
 
