@@ -1,51 +1,43 @@
-# 🚀 HyperGuardV2
+# 🎨 HyperGuardV2
 
-> This application is a modern graphical interface for managing Windows 11 Virtualization-Based Security (VBS) features. It natively implements the logic previously handled by `VBS_1.6.2.cmd`, allowing users to easily toggle security features via a Python-based CLI/GUI.
+## 📌 Context
+**HyperGuardV2** is a modern desktop application (built with Python) designed to give power users, developers, and reverse engineers low-level control over Windows 11 Virtualization-Based Security (VBS) features. By default, Windows locks down many virtualization features, which can conflict with third-party hypervisors, custom drivers, and anti-cheat systems. This app provides a safe, graphical interface to manage and disable these conflicting security layers while providing robust backup and restore capabilities.
 
----
+## 🎯 Core Application Goals
+1. **Detect**: Automatically analyze the system environment (BIOS VT-x/SVM, OS Build, WMI health) and current security feature states.
+2. **Control**: Safely disable tightly integrated Windows security features (VBS, HVCI, Credential Guard, Meltdown mitigations, Windows Hyper-V).
+3. **Manage State**: Keep track of every modification made to the system registry, Boot Configuration Data (BCD), and services to allow for precise "Revert Changes" operations.
 
-## 🛠️ Getting Started
+## 🖥️ Key UI Screens & Components Needed
 
-### Prerequisites
+### 1. 📊 The Dashboard (System Health & Environment)
+- **Top-Level Status**: A clear banner indicating if the system is currently "Standard/Secure" or "Modified/Optimized for Third-Party Hypervisors".
+- **Hardware & Env Checks**: Visual indicators (icons: ✅ / ❌ / ⚠️) for prerequisites: 
+  - Admin Privileges
+  - BIOS Virtualization (VT-x/SVM)
+  - WMI Health status
+- **Action Dashboard**: Prominent "Optimize System" (disable conflicting features) and "Revert Changes" (restore from backup) buttons.
 
-- **Python 3.14+**
-- Windows 11 (with administrative privileges)
+### 2. 🛡️ The Feature Matrix (Toggles & Status)
+A detailed list or grid displaying the 14 core features managed by the app. Each row/card should include:
+- **Feature Name** (e.g., Memory Integrity (HVCI), Credential Guard, Windows Hello Protection).
+- **Current Status Pill**: e.g., `Active`, `Disabled`, or `Locked by UEFI`.
+- **Toggle/Action Button**: Individual controls to manage the feature.
+- **Tooltip/Info Icon**: Hovering over a feature should briefly explain what it does (e.g., "HVCI: Prevents unsigned drivers from loading").
 
-### Installation
+### 3. ⚠️ Warning Modals & Action Flows
+- **BitLocker Intervention**: A modal that appears to warn users that BitLocker will be temporarily suspended to change boot parameters.
+- **Windows Hello Reset**: A critical dialog warning that biometric fingerprints and PINs will be reset if VBS is disabled, requiring the user to type their fallback password next login.
+- **Smart App Control Notification**: A dismissible banner if Smart App Control is attempting to block the application. 
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/your-repo/HyperGuardV2.git
-   cd HyperGuardV2
-   ```
+### 4. ⏳ Progress & Execution State
+- **Console / Status Log**: A bottom pane or sidebar that shows terminal-like output as the app modifies registries (`winreg`) and BCD environments in the background.
+- **Progress Bars**: Smooth loading states for when the app is performing sequential automated tasks.
 
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. Run the application:
-   ```bash
-   # Run the CLI
-   python -m src --help
-
-   # Run the GUI (Default)
-   python -m src
-   ```
-
----
-
-## 🎨 User Interface
-HyperGuardV2 features a modern, reactive web-based UI powered by **NiceGUI**. For more information on how the UI is structured, see [.context/STRUCTURE.md](.context/STRUCTURE.md).
-
----
-
-## 🏗️ Project Structure
-
-Refer to [.context/STRUCTURE.md](.context/STRUCTURE.md) for a detailed breakdown of the directory layout.
-
----
-
-## 🤖 AI Agent Workflow
-
-This repository is optimized for AI-assisted development. Refer to [AGENTS.md](AGENTS.md) for system instructions.
+## 🎨 Design System & Aesthetic Preferences
+- **Style**: Modern Windows 11 (Mica/Fluent design) infused with a "power-user / developer" visual language. 
+- **Theme**: Premium Dark Mode by default.
+- **Color Palette Ideas**: 
+  - Deep dark backgrounds (slate/charcoal).
+  - Status colors: Cyber-blue (info), Success Green (enabled/safe), Warning Amber (modifications needed), Alert Red (critical locks/BitLocker).
+- **Typography**: Clean sans-serif (Inter, Segoe UI) with monospace fonts (Consolas/Fira Code) for the terminal/log areas.

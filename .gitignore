@@ -1,0 +1,15 @@
+
+# Environment
+.env
+.env.local
+.env.*.local
+.venv
+venv/
+ENV/
+
+# Logs
+logs/
+*.log
+
+# Keep the example
+!.env.example
