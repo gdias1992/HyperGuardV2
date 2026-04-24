@@ -7,7 +7,6 @@ The goal is to ensure consistent, high-quality contributions that align with pro
 *   **Project Name:** HyperGuard92
 *   **Purpose:** This application is a modern graphical interface for managing Windows 11 Virtualization-Based Security (VBS) features. It natively implements the logic previously handled by `VBS_1.6.2.cmd`, allowing users to easily toggle security features via a Python-based GUI/CLI.
 *   **Key Technologies:** Python 3.14, pywin32, Pydantic, Ruff, pytest.
-*   **Architecture:** Modular Python Script following a service-oriented structure with clear separation between CLI interface, business logic (vbs_service), and utility functions (registry_ops).
 
 ## 📚 Core Documentation
 To fully grasp the setup, architecture, and design, refer to the following critical files:
