@@ -62,3 +62,132 @@ The application interacts with the following system components:
   - Deep dark backgrounds (slate/charcoal).
   - Status colors: Cyber-blue (info), Success Green (enabled/safe), Warning Amber (modifications needed), Alert Red (critical locks/BitLocker).
 - **Typography**: Clean sans-serif (Inter, Segoe UI) with monospace fonts (Consolas/Fira Code) for the terminal/log areas.
+
+---
+
+## 🚀 Getting Started
+
+### ✅ Prerequisites
+
+| Requirement | Details |
+| :--- | :--- |
+| **OS** | Windows 11 (required for registry and BCD operations) |
+| **Python** | 3.11 or later |
+| **Privileges** | Run terminal **as Administrator** (needed for registry writes and BCD changes) |
+| **pywebview** | Required for native window mode — installed automatically via `requirements.txt` |
+
+---
+
+### 📦 Installation
+
+**1. Clone the repository**
+
+```powershell
+git clone https://github.com/gdias1992/HyperGuardV2.git
+cd HyperGuardV2
+```
+
+**2. Create and activate a virtual environment**
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+**3. Install runtime dependencies**
+
+```powershell
+pip install -r requirements.txt
+```
+
+> To also install developer tooling (pytest, ruff, mypy):
+> ```powershell
+> pip install -e ".[dev]"
+> ```
+
+---
+
+### ⚙️ Environment Configuration
+
+The application is configured through environment variables. A template file is provided:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Then open `.env` and adjust the values as needed:
+
+```dotenv
+# Logging verbosity: DEBUG | INFO | WARN | ERROR
+LOG_LEVEL=INFO
+
+# NiceGUI server bind address and port
+HG_HOST=127.0.0.1
+HG_PORT=8492
+
+# true  → opens the UI in a standalone native desktop window (recommended)
+# false → serves the UI in your default browser at http://<HG_HOST>:<HG_PORT>
+HG_NATIVE=true
+```
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `LOG_LEVEL` | `INFO` | Minimum log level written to `logs/app.log` and the console. |
+| `HG_HOST` | `127.0.0.1` | Address NiceGUI binds to. Use `0.0.0.0` to expose on the local network. |
+| `HG_PORT` | `8492` | TCP port the embedded web server listens on. |
+| `HG_NATIVE` | `true` | When `true`, launches a native OS window instead of opening a browser tab. |
+
+> **Security note:** `.env` is git-ignored. Never commit it. Only `.env.example` is tracked.
+
+---
+
+### ▶️ Running the Application
+
+**Native desktop window (recommended)**
+
+```powershell
+python -m src
+```
+
+**Browser mode** (useful for remote access or debugging)
+
+```powershell
+$env:HG_NATIVE = "false"; python -m src
+```
+
+Then navigate to `http://127.0.0.1:8492` in your browser.
+
+**Custom host/port override**
+
+```powershell
+$env:HG_HOST = "0.0.0.0"; $env:HG_PORT = "9000"; python -m src
+```
+
+---
+
+### 🧪 Running Tests
+
+```powershell
+python -m pytest
+```
+
+To run with verbose output and coverage context:
+
+```powershell
+python -m pytest -v
+```
+
+---
+
+### 🧹 Code Quality
+
+```powershell
+# Lint and auto-fix
+ruff check . --fix
+
+# Format
+ruff format .
+
+# Static type checking
+mypy src
+```

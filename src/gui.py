@@ -186,9 +186,10 @@ def _feature_card(feature: Feature) -> None:
                         "text-[10px] mono text-zinc-400 tracking-wider"
                     )
 
-            # Toggle switch
+            # Toggle switch — ON (right) means feature is currently active/enabled
+            # in Windows; OFF (left) means it has been moved to its target state.
             switch = ui.switch(
-                value=feature.status not in {"Active", "Monitoring"},
+                value=feature.status in {"Active", "Monitoring"},
                 on_change=lambda _e, fid=feature.id: _toggle_feature(fid),
             ).classes("shrink-0")
             if feature.locked or state.is_processing:
@@ -312,8 +313,8 @@ def logs_panel() -> None:
 
     with ui.element("div").classes(
         "flex-1 bg-[#0a0a0c] border border-zinc-800 rounded-xl mono text-xs "
-        "p-4 overflow-y-auto shadow-inner custom-scrollbar w-full"
-    ).style("min-height: 60vh; max-height: 70vh"):
+        "p-4 overflow-y-auto shadow-inner custom-scrollbar w-full min-h-0"
+    ):
         for line in state.logs:
             ui.label(line).classes(f"mb-1.5 leading-relaxed {_log_color(line)}")
         if not state.is_processing and state.logs:
@@ -329,7 +330,7 @@ def main_pane() -> None:
             with ui.column().classes("gap-0 w-full"):
                 feature_matrix()
     else:
-        with ui.column().classes("p-6 w-full h-full"):
+        with ui.column().classes("p-6 w-full h-full gap-0 min-h-0"):
             logs_panel()
 
 
@@ -548,11 +549,13 @@ def _build_sidebar() -> None:
                 for icon_name, label in [
                     ("lock", "Admin Privileges"),
                     ("memory", "BIOS VT-x/SVM"),
-                    ("monitoring", "WMI Health"),
+                    ("favorite", "WMI Health"),
                 ]:
                     with ui.row().classes("items-center justify-between w-full no-wrap"):
                         with ui.row().classes("items-center gap-2 no-wrap"):
-                            ui.icon(icon_name).classes("text-emerald-400 text-sm")
+                            ui.icon(icon_name).classes(
+                                "text-emerald-400 text-sm w-4 text-center"
+                            )
                             ui.label(label).classes("text-xs text-zinc-300")
                         ui.icon("check_circle").classes("text-emerald-400 text-sm")
                 with ui.row().classes(

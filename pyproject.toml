@@ -5,6 +5,7 @@ description = "Modern desktop GUI for managing Windows 11 Virtualization-Based S
 requires-python = ">=3.14"
 dependencies = [
     "nicegui>=2.0",
+    "pywebview>=5.0; sys_platform == 'win32'",
     "pydantic>=2.12",
     "pydantic-settings>=2.5",
     "python-dotenv>=1.0",
