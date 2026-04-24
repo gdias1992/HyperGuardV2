@@ -212,55 +212,8 @@ def _feature_card(feature: Feature) -> None:
 
 
 @ui.refreshable
-def hero_card() -> None:
-    """Top action card with PIRATE / DEFENDER buttons."""
-    with ui.element("div").classes(
-        "bg-gradient-to-br from-zinc-900 to-black border border-white/10 "
-        "rounded-2xl p-8 relative overflow-hidden shadow-xl w-full"
-    ):
-        with ui.row().classes(
-            "items-center justify-between gap-6 w-full no-wrap"
-        ):
-            with ui.column().classes("gap-2 grow min-w-0"):
-                ui.label("System Optimization Engine").classes(
-                    "text-2xl font-bold text-white"
-                )
-                ui.label(
-                    "One-click deployment to safely disable Windows Virtualization-Based "
-                    "Security, HVCI, and conflicting hypervisor layers. Automatically "
-                    "tracks changes for seamless reversion."
-                ).classes("text-zinc-400 max-w-xl text-sm leading-relaxed")
-
-            with ui.column().classes("gap-3 min-w-[200px] shrink-0"):
-                pirate_label = (
-                    "PROCESSING..."
-                    if state.is_processing
-                    else "PIRATE MODE ACTIVE"
-                    if state.system_state == "Pirate Mode"
-                    else "💀  PIRATE MODE"
-                )
-                pirate_btn = ui.button(
-                    pirate_label,
-                    on_click=_open_hello_modal,
-                ).classes(
-                    "px-6 py-3 rounded-xl text-sm font-bold bg-white hover:bg-zinc-200 "
-                    "text-black shadow-lg w-full"
-                ).props("flat no-caps")
-                if state.is_processing or state.system_state == "Pirate Mode":
-                    pirate_btn.disable()
-
-                ui.button(
-                    "🛡  DEFENDER MODE",
-                    on_click=_restore_defaults,
-                ).classes(
-                    "px-6 py-2.5 rounded-xl text-sm font-medium bg-zinc-900 "
-                    "hover:bg-zinc-800 text-white border border-white/10 w-full"
-                ).props("flat no-caps")
-
-
-@ui.refreshable
 def system_profile_panel() -> None:
-    """Sidebar footer panel showing the current system state."""
+    """Sidebar panel: current state + Pirate/Defender optimization buttons."""
     icon_name = {
         "Pirate Mode": "check_circle",
         "Modifying...": "autorenew",
@@ -271,20 +224,58 @@ def system_profile_panel() -> None:
         "Modifying...": "text-amber-400",
         "Defender Mode": "text-zinc-400",
     }[state.system_state]
+    state_label_color = (
+        "text-emerald-400"
+        if state.system_state == "Pirate Mode"
+        else color
+        if state.system_state == "Modifying..."
+        else "text-zinc-300"
+    )
 
-    with ui.element("div").classes(
-        "bg-zinc-900/80 border border-white/5 rounded-xl p-3.5 w-full"
+    with ui.column().classes(
+        "bg-zinc-900/80 border border-white/5 rounded-xl p-3.5 gap-3 w-full"
     ):
         ui.label("System Profile").classes(
-            "text-[10px] uppercase text-zinc-500 font-semibold mb-2 tracking-wider"
+            "text-[10px] uppercase text-zinc-500 font-semibold tracking-wider"
         )
-        with ui.row().classes("items-center gap-2 no-wrap"):
+
+        with ui.row().classes(
+            "items-center gap-2 no-wrap pb-3 border-b border-white/5 w-full"
+        ):
             spin = " animate-spin" if state.system_state == "Modifying..." else ""
-            ui.icon(icon_name).classes(f"{color}{spin} text-base")
+            ui.icon(icon_name).classes(f"{color}{spin} text-base shrink-0")
             ui.label(state.system_state).classes(
-                f"text-sm font-medium "
-                f"{'text-emerald-400' if state.system_state == 'Pirate Mode' else color if state.system_state == 'Modifying...' else 'text-zinc-300'}"
+                f"text-sm font-medium {state_label_color}"
             )
+
+        ui.label("OPTIMIZATION ENGINE").classes(
+            "text-[10px] uppercase text-zinc-500 font-semibold tracking-wider"
+        )
+
+        pirate_label = (
+            "PROCESSING..."
+            if state.is_processing
+            else "PIRATE MODE ACTIVE"
+            if state.system_state == "Pirate Mode"
+            else "💀  PIRATE MODE"
+        )
+        pirate_btn = ui.button(
+            pirate_label,
+            on_click=_open_hello_modal,
+        ).classes(
+            "px-3 py-2 rounded-lg text-xs font-bold bg-white hover:bg-zinc-200 "
+            "text-black shadow-lg w-full"
+        ).props("flat no-caps")
+        if state.is_processing or state.system_state == "Pirate Mode":
+            pirate_btn.disable()
+
+        ui.button(
+            "🛡  DEFENDER MODE",
+            on_click=_restore_defaults,
+        ).classes(
+            "px-3 py-2 rounded-lg text-xs font-medium bg-zinc-900 "
+            "hover:bg-zinc-800 text-white border border-white/10 w-full"
+        ).props("flat no-caps")
 
 
 @ui.refreshable
@@ -326,7 +317,6 @@ def main_pane() -> None:
     """Switches between dashboard and logs based on active tab."""
     if state.active_tab == "dashboard":
         with ui.column().classes("p-6 max-w-6xl mx-auto gap-8 w-full"):
-            hero_card()
             with ui.column().classes("gap-0 w-full"):
                 feature_matrix()
     else:
@@ -379,7 +369,7 @@ def _toggle_feature(feature_id: int) -> None:
 
 def _restore_defaults() -> None:
     state.reset()
-    hero_card.refresh()
+    system_profile_panel.refresh()
     feature_matrix.refresh()
     system_profile_panel.refresh()
     logs_panel.refresh()
@@ -399,7 +389,7 @@ async def _start_optimization_sequence() -> None:
 
     main_pane.refresh()
     sidebar_nav.refresh()
-    hero_card.refresh()
+    system_profile_panel.refresh()
     system_profile_panel.refresh()
     logs_panel.refresh()
 
@@ -418,7 +408,7 @@ async def _start_optimization_sequence() -> None:
     state.add_log("[SUCCESS] System optimized for 3rd-Party Hypervisors.")
     state.add_log("[ALERT] A system restart is required for changes to take effect.")
 
-    hero_card.refresh()
+    system_profile_panel.refresh()
     feature_matrix.refresh()
     system_profile_panel.refresh()
     logs_panel.refresh()
@@ -538,8 +528,10 @@ def _build_sidebar() -> None:
         with ui.column().classes("flex-1 px-4 gap-1 mt-4 w-full"):
             sidebar_nav()
 
-        # Diagnostics + system profile
+        # System profile + optimization engine, then diagnostics
         with ui.column().classes("p-4 gap-4 w-full"):
+            system_profile_panel()
+
             with ui.column().classes(
                 "bg-zinc-900/50 border border-white/5 rounded-xl p-3.5 gap-3 w-full"
             ):
@@ -567,8 +559,6 @@ def _build_sidebar() -> None:
                         "Smart App Control is currently in "
                         "<strong>Evaluation Mode</strong>.</p>"
                     )
-
-            system_profile_panel()
 
 
 @ui.page("/")
