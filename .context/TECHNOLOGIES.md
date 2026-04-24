@@ -1,6 +1,6 @@
 # 🐍 Project Technologies
 
-> Official technology stack for the HyperGuardV2 Python Script.
+> Official technology stack for the HyperGuard92 Python Script.
 
 ---
 

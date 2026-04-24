@@ -1,6 +1,6 @@
-# 🛡️ Analysis of VBS_1.6.2.cmd (HyperGuardV2 Implementation Guide)
+# 🛡️ Analysis of VBS_1.6.2.cmd (HyperGuard92 Implementation Guide)
 
-This document provides a detailed breakdown of the features and logic implemented in `VBS_1.6.2.cmd`. This analysis serves as the architectural foundation for the **HyperGuardV2** Python application.
+This document provides a detailed breakdown of the features and logic implemented in `VBS_1.6.2.cmd`. This analysis serves as the architectural foundation for the **HyperGuard92** Python application.
 
 ---
 
@@ -143,12 +143,12 @@ The script interacts with the following system components:
 
 ---
 
-## 🛠️ Implementation Strategy for HyperGuardV2
+## 🛠️ Implementation Strategy for HyperGuard92
 
 | Phase | Technology | Notes |
 | :--- | :--- | :--- |
 | **Detection** | `pywin32` / `WMI` | Use native Python WMI wrappers to query `Win32_DeviceGuard` and `Win32_Processor`. |
-| **Registry Ops** | `winreg` | Atomic updates to the registry. Always backup keys to `HKLM\SOFTWARE\HyperGuardV2\Backups`. |
+| **Registry Ops** | `winreg` | Atomic updates to the registry. Always backup keys to `HKLM\SOFTWARE\HyperGuard92\Backups` |
 | **EFI/BCD** | `subprocess` | Direct execution of `bcdedit` and `mountvol`. Requires careful handling of GUIDs. |
 | **UI Validation** | `Playwright` | Ensure the state toggles and progress bars correctly reflect the background registry/BCD tasks. |
 | **Safety** | Pydantic Models | Define strict schemas for "Safe States" to prevent accidental bricking or security policy violations on managed devices. |

@@ -4,7 +4,7 @@ This file provides system instructions and necessary context to AI agents (like 
 The goal is to ensure consistent, high-quality contributions that align with project standards and conventions.
 
 ## 🏢 Project Context
-*   **Project Name:** HyperGuardV2
+*   **Project Name:** HyperGuard92
 *   **Purpose:** This application is a modern graphical interface for managing Windows 11 Virtualization-Based Security (VBS) features. It natively implements the logic previously handled by `VBS_1.6.2.cmd`, allowing users to easily toggle security features via a Python-based GUI/CLI.
 *   **Key Technologies:** Python 3.14, pywin32, Pydantic, Ruff, pytest.
 *   **Architecture:** Modular Python Script following a service-oriented structure with clear separation between CLI interface, business logic (vbs_service), and utility functions (registry_ops).

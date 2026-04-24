@@ -1,7 +1,7 @@
-# 🎨 HyperGuardV2
+# 🎨 HyperGuard92
 
 ## 📌 Context
-**HyperGuardV2** is a modern desktop application (built with Python) designed to give power users, developers, and reverse engineers low-level control over Windows 11 Virtualization-Based Security (VBS) features. By default, Windows locks down many virtualization features, which can conflict with third-party hypervisors, custom drivers, and anti-cheat systems. This app provides a safe, graphical interface to manage and disable these conflicting security layers while providing robust backup and restore capabilities.
+**HyperGuard92** is a modern desktop application (built with Python) designed to give power users, developers, and reverse engineers low-level control over Windows 11 Virtualization-Based Security (VBS) features. By default, Windows locks down many virtualization features, which can conflict with third-party hypervisors, custom drivers, and anti-cheat systems. This app provides a safe, graphical interface to manage and disable these conflicting security layers while providing robust backup and restore capabilities.
 
 ## 🎯 Core Application Goals
 1. **Detect**: Automatically analyze the system environment (BIOS VT-x/SVM, OS Build, WMI health) and current security feature states.
