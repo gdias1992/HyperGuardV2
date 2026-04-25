@@ -1,8 +1,10 @@
-"""HyperGuard92 NiceGUI prototype interface.
+"""HyperGuard92 NiceGUI interface.
 
-This module mirrors the React mock 1:1: a sidebar with diagnostics panel and a
-main pane with two tabs (Features / Execution Logs). All side-effects on the
-real OS are simulated — there are **no** registry or BCD modifications here.
+The sidebar hosts diagnostics and the PIRATE / DEFENDER mode buttons. The main
+pane switches between the Feature Matrix and the Execution Terminal.
+
+All destructive work is delegated to :class:`~src.services.vbs_service.VbsService`;
+this module is responsible for composition and event streaming only.
 """
 
 from __future__ import annotations
@@ -14,6 +16,13 @@ from typing import Literal
 from nicegui import ui
 
 from src.models import INITIAL_FEATURES, Feature, clone_features
+from src.models.state import OperationResult, OperationStatus
+from src.services.preflight import PreflightReport
+from src.services.system_info import FeatureSnapshot, SystemInfo
+from src.services.vbs_service import ProgressEvent, VbsService
+from src.utils.logging import get_logger
+
+_logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants — design tokens borrowed from the React mock
@@ -66,7 +75,7 @@ EXTRA_HEAD = """
 
 
 class AppState:
-    """Shared mutable state for the running prototype session."""
+    """Shared mutable state for the running session."""
 
     def __init__(self) -> None:
         self.active_tab: Literal["dashboard", "logs"] = "dashboard"
@@ -74,11 +83,12 @@ class AppState:
         self.features: list[Feature] = clone_features()
         self.logs: list[str] = [
             f"[SYSTEM] HyperGuard92 initialized. {VERSION}",
-            "[INFO] Environment pre-checks passed.",
-            "[WARN] System is currently running in standard secure mode.",
         ]
         self.is_processing: bool = False
         self.progress: int = 0
+        self.preflight: PreflightReport | None = None
+        self.reboot_pending: bool = False
+        self._active_task: asyncio.Task[None] | None = None
 
     def add_log(self, msg: str) -> None:
         ts = datetime.now().strftime("%H:%M:%S")
@@ -92,6 +102,49 @@ class AppState:
 
 
 state = AppState()
+vbs = VbsService()
+system_info = SystemInfo()
+
+
+# ---------------------------------------------------------------------------
+# Feature status synchronization
+# ---------------------------------------------------------------------------
+
+
+def _apply_snapshot(snapshots: list[FeatureSnapshot]) -> None:
+    """Update :data:`state.features` in-place from a SystemInfo snapshot."""
+    lookup = {s.feature_id: s for s in snapshots}
+    for feature in state.features:
+        snap = lookup.get(feature.id)
+        if snap is not None and snap.status:
+            feature.status = snap.status
+
+
+async def _refresh_feature_states() -> None:
+    """Poll :class:`SystemInfo` off the event loop and refresh the matrix."""
+    try:
+        snapshots = await asyncio.to_thread(system_info.snapshot_all)
+    except Exception as exc:
+        _logger.warning("Could not refresh feature snapshot: %s", exc)
+        state.add_log(f"[WARN] Feature snapshot failed: {exc}")
+        return
+    _apply_snapshot(snapshots)
+    feature_matrix.refresh()
+
+
+async def _run_preflight() -> None:
+    try:
+        report = await asyncio.to_thread(vbs.preflight_report)
+    except Exception as exc:
+        _logger.warning("Preflight failed: %s", exc)
+        state.add_log(f"[ERROR] Preflight failed: {exc}")
+        return
+    state.preflight = report
+    if report.ok:
+        state.add_log("[INFO] Environment pre-checks passed.")
+    else:
+        for warning in report.warnings:
+            state.add_log(f"[WARN] {warning}")
 
 
 # ---------------------------------------------------------------------------
@@ -345,6 +398,46 @@ def sidebar_nav() -> None:
                 ui.element("div").classes("w-1 h-4 bg-white rounded-full")
 
 
+@ui.refreshable
+def diagnostics_panel() -> None:
+    """Live diagnostics surface — backed by :class:`Preflight`."""
+    report = state.preflight
+
+    def _check(ok: bool) -> tuple[str, str]:
+        return ("check_circle", "text-emerald-400") if ok else ("error", "text-red-400")
+
+    rows: list[tuple[str, str, bool]] = [
+        ("lock", "Admin Privileges", report.is_admin if report else False),
+        ("memory", "BIOS VT-x/SVM", report.virtualization if report else False),
+        ("favorite", "WMI Health", report.wmi_healthy if report else False),
+    ]
+
+    with ui.column().classes(
+        "bg-zinc-900/50 border border-white/5 rounded-xl p-3.5 gap-3 w-full"
+    ):
+        ui.label("DIAGNOSTICS").classes(
+            "text-[10px] uppercase text-zinc-500 font-semibold tracking-wider"
+        )
+        for icon_name, label, ok in rows:
+            status_icon, status_color = _check(ok)
+            with ui.row().classes("items-center justify-between w-full no-wrap"):
+                with ui.row().classes("items-center gap-2 no-wrap"):
+                    ui.icon(icon_name).classes(
+                        f"{status_color} text-sm w-4 text-center"
+                    )
+                    ui.label(label).classes("text-xs text-zinc-300")
+                ui.icon(status_icon).classes(f"{status_color} text-sm")
+        sac = report.smart_app_control if report else "Unknown"
+        with ui.row().classes(
+            "pt-3 mt-1 border-t border-white/5 items-start gap-2 no-wrap w-full"
+        ):
+            ui.icon("info").classes("text-zinc-400 text-sm shrink-0 mt-0.5")
+            ui.html(
+                "<p class='text-[10px] text-zinc-400 leading-snug'>"
+                f"Smart App Control: <strong>{sac}</strong>.</p>"
+            )
+
+
 # ---------------------------------------------------------------------------
 # Event handlers
 # ---------------------------------------------------------------------------
@@ -368,11 +461,37 @@ def _toggle_feature(feature_id: int) -> None:
 
 
 def _restore_defaults() -> None:
-    state.reset()
+    if state.is_processing:
+        return
+    task = asyncio.create_task(_run_defender_mode())
+    state._active_task = task  # keep reference to prevent GC
+
+
+async def _run_defender_mode() -> None:
+    state.is_processing = True
+    state.system_state = "Modifying..."
+    state.progress = 0
+    state.active_tab = "logs"
+    state.add_log("[USER] Restoring system to default secure state.")
     system_profile_panel.refresh()
-    feature_matrix.refresh()
-    system_profile_panel.refresh()
+    main_pane.refresh()
+    sidebar_nav.refresh()
     logs_panel.refresh()
+
+    loop = asyncio.get_running_loop()
+
+    def on_progress(event: ProgressEvent) -> None:
+        loop.call_soon_threadsafe(_handle_progress, event)
+
+    try:
+        results = await vbs.revert(progress=on_progress)
+    except Exception as exc:
+        _logger.exception("Revert failed")
+        state.add_log(f"[ERROR] Revert failed: {exc}")
+        results = []
+
+    _finalize_workflow(results, success_state="Defender Mode")
+    await _refresh_feature_states()
 
 
 def _open_hello_modal() -> None:
@@ -390,28 +509,66 @@ async def _start_optimization_sequence() -> None:
     main_pane.refresh()
     sidebar_nav.refresh()
     system_profile_panel.refresh()
-    system_profile_panel.refresh()
     logs_panel.refresh()
 
-    for msg, pct in OPTIMIZATION_STEPS:
-        await asyncio.sleep(0.8)
-        state.add_log(f"[ACTION] {msg}")
-        state.progress = pct
-        logs_panel.refresh()
+    loop = asyncio.get_running_loop()
 
-    for f in state.features:
-        if not f.locked:
-            f.status = f.target
+    def on_progress(event: ProgressEvent) -> None:
+        # Invoked from the worker thread — marshal to the event loop.
+        loop.call_soon_threadsafe(_handle_progress, event)
 
-    state.system_state = "Pirate Mode"
+    try:
+        results = await vbs.optimize(progress=on_progress)
+    except Exception as exc:
+        _logger.exception("Optimize failed")
+        state.add_log(f"[ERROR] Optimization aborted: {exc}")
+        results = []
+
+    _finalize_workflow(results, success_state="Pirate Mode")
+    await _refresh_feature_states()
+
+
+# ---------------------------------------------------------------------------
+# Progress + finalization helpers
+# ---------------------------------------------------------------------------
+
+
+def _handle_progress(event: ProgressEvent) -> None:
+    """Render a :class:`ProgressEvent` into the Logs tab."""
+    state.progress = max(0, min(100, int(event.percent)))
+    suffix = f" — {event.message}" if event.message else ""
+    state.add_log(f"[{event.level}] {event.step}{suffix}")
+    logs_panel.refresh()
+
+
+def _finalize_workflow(
+    results: list[OperationResult], *, success_state: SystemState
+) -> None:
+    """Apply the final state after a workflow finishes."""
+    failed = [r for r in results if r.status == OperationStatus.FAILED]
+    needs_reboot = any(r.requires_reboot for r in results)
+    state.reboot_pending = needs_reboot
+
+    if failed:
+        state.system_state = "Defender Mode"
+        state.add_log(f"[ERROR] {len(failed)} step(s) failed. See log for details.")
+    else:
+        state.system_state = success_state
+        state.add_log(f"[SUCCESS] {success_state} applied.")
+
+    if needs_reboot:
+        state.add_log("[ALERT] A system restart is required for changes to take effect.")
+
     state.is_processing = False
-    state.add_log("[SUCCESS] System optimized for 3rd-Party Hypervisors.")
-    state.add_log("[ALERT] A system restart is required for changes to take effect.")
-
     system_profile_panel.refresh()
     feature_matrix.refresh()
-    system_profile_panel.refresh()
     logs_panel.refresh()
+
+    if needs_reboot:
+        try:
+            reboot_dialog.open()
+        except NameError:  # pragma: no cover - dialog not built yet
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -420,10 +577,23 @@ async def _start_optimization_sequence() -> None:
 
 hello_dialog: ui.dialog
 bitlocker_dialog: ui.dialog
+reboot_dialog: ui.dialog
+
+
+def _trigger_reboot() -> None:
+    import subprocess
+
+    state.add_log("[ACTION] Issuing shutdown /r /t 0")
+    try:
+        subprocess.Popen(["shutdown", "/r", "/t", "0"])  # noqa: S603,S607
+    except OSError as exc:
+        _logger.error("Could not issue reboot: %s", exc)
+        state.add_log(f"[ERROR] Could not reboot: {exc}")
+        logs_panel.refresh()
 
 
 def _build_modals() -> None:
-    global hello_dialog, bitlocker_dialog
+    global hello_dialog, bitlocker_dialog, reboot_dialog
 
     # --- Windows Hello reset modal -----------------------------------------
     with ui.dialog() as hello_dialog, ui.card().classes(
@@ -499,6 +669,32 @@ def _build_modals() -> None:
                 "text-zinc-950 rounded-lg"
             ).props("flat no-caps")
 
+    # --- Reboot confirmation modal -----------------------------------------
+    with ui.dialog() as reboot_dialog, ui.card().classes(
+        "bg-zinc-900 border border-amber-500/30 rounded-2xl shadow-2xl "
+        "max-w-md w-full p-6 gap-0"
+    ):
+        with ui.element("div").classes(
+            "w-12 h-12 bg-amber-500/10 rounded-full flex items-center justify-center "
+            "mb-4 text-amber-400 border border-amber-500/20"
+        ):
+            ui.icon("restart_alt").classes("text-2xl")
+        ui.label("Restart Required").classes("text-xl font-bold text-white mb-2")
+        ui.label(
+            "Some changes only take effect after a reboot. Restart now?"
+        ).classes("text-sm text-zinc-400 mb-6")
+        with ui.row().classes("justify-end gap-3 w-full"):
+            ui.button("Later", on_click=reboot_dialog.close).classes(
+                "px-4 py-2 text-sm font-medium text-zinc-400 hover:text-white"
+            ).props("flat no-caps")
+            ui.button(
+                "Restart now",
+                on_click=lambda: (reboot_dialog.close(), _trigger_reboot()),
+            ).classes(
+                "px-4 py-2 text-sm font-bold bg-amber-500 hover:bg-amber-400 "
+                "text-zinc-950 rounded-lg"
+            ).props("flat no-caps")
+
 
 # ---------------------------------------------------------------------------
 # Page composition
@@ -531,34 +727,7 @@ def _build_sidebar() -> None:
         # System profile + optimization engine, then diagnostics
         with ui.column().classes("p-4 gap-4 w-full"):
             system_profile_panel()
-
-            with ui.column().classes(
-                "bg-zinc-900/50 border border-white/5 rounded-xl p-3.5 gap-3 w-full"
-            ):
-                ui.label("DIAGNOSTICS").classes(
-                    "text-[10px] uppercase text-zinc-500 font-semibold tracking-wider"
-                )
-                for icon_name, label in [
-                    ("lock", "Admin Privileges"),
-                    ("memory", "BIOS VT-x/SVM"),
-                    ("favorite", "WMI Health"),
-                ]:
-                    with ui.row().classes("items-center justify-between w-full no-wrap"):
-                        with ui.row().classes("items-center gap-2 no-wrap"):
-                            ui.icon(icon_name).classes(
-                                "text-emerald-400 text-sm w-4 text-center"
-                            )
-                            ui.label(label).classes("text-xs text-zinc-300")
-                        ui.icon("check_circle").classes("text-emerald-400 text-sm")
-                with ui.row().classes(
-                    "pt-3 mt-1 border-t border-white/5 items-start gap-2 no-wrap w-full"
-                ):
-                    ui.icon("info").classes("text-zinc-400 text-sm shrink-0 mt-0.5")
-                    ui.html(
-                        "<p class='text-[10px] text-zinc-400 leading-snug'>"
-                        "Smart App Control is currently in "
-                        "<strong>Evaluation Mode</strong>.</p>"
-                    )
+            diagnostics_panel()
 
 
 @ui.page("/")
@@ -575,6 +744,14 @@ def index() -> None:
             main_pane()
 
     _build_modals()
+
+    async def _bootstrap() -> None:
+        await _run_preflight()
+        diagnostics_panel.refresh()
+        logs_panel.refresh()
+        await _refresh_feature_states()
+
+    ui.timer(0.1, lambda: asyncio.create_task(_bootstrap()), once=True)
 
 
 # ---------------------------------------------------------------------------
