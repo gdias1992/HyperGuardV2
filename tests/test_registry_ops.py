@@ -5,7 +5,6 @@ The tests install a fake ``winreg`` module so they run on every OS.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -21,7 +20,7 @@ class FakeKey:
         self.store = store
         self.path = path
 
-    def __enter__(self) -> "FakeKey":
+    def __enter__(self) -> FakeKey:
         return self
 
     def __exit__(self, *_: Any) -> None:

@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import suppress
 from datetime import datetime
 from typing import Literal
 
 from nicegui import ui
 
-from src.models import INITIAL_FEATURES, Feature, clone_features
+from src.models import Feature, clone_features
 from src.models.state import OperationResult, OperationStatus
 from src.services.preflight import PreflightReport
 from src.services.system_info import FeatureSnapshot, SystemInfo
@@ -30,6 +31,11 @@ _logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 VERSION = "v1.4.2"
+FONT_URL = (
+    "https://fonts.googleapis.com/css2?"
+    "family=Inter:wght@400;500;600;700;800&"
+    "family=JetBrains+Mono:wght@400;500&display=swap"
+)
 
 OPTIMIZATION_STEPS: list[tuple[str, int]] = [
     ("Suspending BitLocker on C:...", 15),
@@ -47,7 +53,7 @@ SystemState = Literal["Defender Mode", "Modifying...", "Pirate Mode"]
 EXTRA_HEAD = """
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="__FONT_URL__" rel="stylesheet">
 <style>
   html, body, .nicegui-content { background:#000; color:#e4e4e7;
     font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
@@ -67,7 +73,7 @@ EXTRA_HEAD = """
   .q-page { padding: 0 !important; }
   .nicegui-content > .q-page-container > .q-page { padding: 0 !important; }
 </style>
-"""
+""".replace("__FONT_URL__", FONT_URL)
 
 
 # ---------------------------------------------------------------------------
@@ -160,11 +166,57 @@ def _pill_classes(status: str, target: str) -> str:
         return f"{base} bg-red-500/10 text-red-400 border-red-500/20"
     if status in {"Configured", "Test Signing", "Active (Unnecessary)"}:
         return f"{base} bg-amber-500/10 text-amber-400 border-amber-500/20"
-    if status in {"Active", "Enabled", "Running", "Functional", "On", "Not Required (AMD)"} or status == target:
+    secure_statuses = {
+        "Active",
+        "Enabled",
+        "Running",
+        "Functional",
+        "On",
+        "Not Required (AMD)",
+    }
+    if status in secure_statuses or status == target:
         return f"{base} bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
     if status == "Monitoring":
         return f"{base} bg-white/10 text-white border-white/20"
     return f"{base} bg-zinc-800 text-zinc-400 border-zinc-700"
+
+
+def _normalized_status(status: str) -> str:
+    return status.strip().casefold()
+
+
+def _feature_card_classes(feature: Feature) -> str:
+    """Tailwind classes for a card border that reflects the current security state."""
+    base = (
+        "flex flex-col p-5 rounded-lg bg-zinc-900/30 border-2 "
+        "transition-all duration-300"
+    )
+    status = _normalized_status(feature.status)
+    pirate = _normalized_status(feature.pirate_state)
+    defender = _normalized_status(feature.defender_state)
+
+    secure_aliases = {"active", "enabled", "running", "functional", "on"}
+    vulnerable_aliases = {"disabled", "suspended", "removed", "failed", "off"}
+    caution_aliases = {
+        "configured",
+        "monitoring",
+        "test signing",
+        "active (unnecessary)",
+        "unknown",
+        "not installed",
+    }
+
+    if defender != "n/a" and status == defender:
+        return f"{base} border-emerald-500/60 hover:border-emerald-400/80 hover:bg-zinc-900/60"
+    if status == pirate:
+        return f"{base} border-red-500/60 hover:border-red-400/80 hover:bg-zinc-900/60"
+    if status in secure_aliases or status == "not required (amd)":
+        return f"{base} border-emerald-500/60 hover:border-emerald-400/80 hover:bg-zinc-900/60"
+    if status in vulnerable_aliases:
+        return f"{base} border-red-500/60 hover:border-red-400/80 hover:bg-zinc-900/60"
+    if status in caution_aliases:
+        return f"{base} border-amber-500/50 hover:border-amber-400/70 hover:bg-zinc-900/60"
+    return f"{base} border-zinc-700 hover:border-zinc-500 hover:bg-zinc-900/60"
 
 
 def _log_color(line: str) -> str:
@@ -212,10 +264,7 @@ def feature_matrix() -> None:
 
 
 def _feature_card(feature: Feature) -> None:
-    with ui.element("div").classes(
-        "flex flex-col p-5 rounded-2xl bg-zinc-900/30 border border-white/5 "
-        "hover:border-white/10 hover:bg-zinc-900/60 transition-all duration-300"
-    ):
+    with ui.element("div").classes(_feature_card_classes(feature)):
         # --- Header row -----------------------------------------------------
         with ui.row().classes("justify-between items-start mb-5 w-full no-wrap"):
             with ui.column().classes("gap-2 pr-4 grow min-w-0"):
@@ -226,15 +275,17 @@ def _feature_card(feature: Feature) -> None:
                     info_icon = ui.icon("info").classes(
                         "text-zinc-600 hover:text-white transition-colors text-sm"
                     )
-                    with info_icon:
-                        with ui.tooltip().classes("p-0"):
-                            with ui.column().classes("gap-2 max-w-xs"):
-                                ui.label(feature.name).classes(
-                                    "text-white font-semibold text-sm"
-                                )
-                                ui.label(feature.desc).classes(
-                                    "text-xs text-zinc-300 leading-relaxed"
-                                )
+                    with (
+                        info_icon,
+                        ui.tooltip().classes("p-0"),
+                        ui.column().classes("gap-2 max-w-xs"),
+                    ):
+                        ui.label(feature.name).classes(
+                            "text-white font-semibold text-sm"
+                        )
+                        ui.label(feature.desc).classes(
+                            "text-xs text-zinc-300 leading-relaxed"
+                        )
                 with ui.row().classes(
                     "items-center gap-1.5 bg-black/40 px-2 py-1 rounded-md "
                     "border border-white/5 self-start no-wrap"
@@ -419,9 +470,10 @@ def logs_panel() -> None:
 def main_pane() -> None:
     """Switches between dashboard and logs based on active tab."""
     if state.active_tab == "dashboard":
-        with ui.column().classes("p-6 max-w-6xl mx-auto gap-8 w-full"):
-            with ui.column().classes("gap-0 w-full"):
-                feature_matrix()
+        with ui.column().classes("p-6 max-w-6xl mx-auto gap-8 w-full"), ui.column().classes(
+            "gap-0 w-full"
+        ):
+            feature_matrix()
     else:
         with ui.column().classes("p-6 w-full h-full gap-0 min-h-0"):
             logs_panel()
@@ -670,10 +722,8 @@ def _finalize_workflow(
     logs_panel.refresh()
 
     if needs_reboot:
-        try:
+        with suppress(NameError):  # pragma: no cover - dialog not built yet
             reboot_dialog.open()
-        except NameError:  # pragma: no cover - dialog not built yet
-            pass
 
 
 # ---------------------------------------------------------------------------

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 try:  # pragma: no cover - platform specific
@@ -347,7 +347,7 @@ class RegistryOps:
                         if "timestamp" in data and isinstance(data["timestamp"], str):
                             data["timestamp"] = datetime.fromisoformat(
                                 data["timestamp"].replace("Z", "+00:00")
-                            ).astimezone(timezone.utc)
+                            ).astimezone(UTC)
                         entries.append(BackupEntry.model_validate(data))
                     except (ValueError, TypeError) as exc:
                         logger.warning(

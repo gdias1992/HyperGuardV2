@@ -2,7 +2,8 @@
 
 The heavy lifting is split between:
 
-* WMI queries (``Win32_DeviceGuard``, ``Win32_Processor`` …) via ``pywin32``.
+* WMI/CIM queries (``Win32_DeviceGuard``, ``Win32_Processor`` …) via
+    ``pywin32`` COM with PowerShell fallbacks.
 * A direct ``NtQuerySystemInformation`` call through :mod:`ctypes` for feature
   classes Windows does not surface via WMI (DSE = 103, KVA Shadow = 196).
 """
@@ -11,6 +12,7 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.wintypes as wt
+import json
 import platform
 import subprocess
 from dataclasses import dataclass
@@ -37,6 +39,10 @@ SPECULATION_KVA_SHADOW_ENABLED = 0x01
 SPECULATION_BPB_ENABLED = 0x20
 SPECULATION_BPB_TARGETS = 0x10
 
+FACEIT_SERVICE_NAMES = ("FACEIT", "FACEITService")
+ROOT_CIMV2_NAMESPACE = "root\\cimv2"
+DEVICE_GUARD_NAMESPACE = "root\\Microsoft\\Windows\\DeviceGuard"
+
 
 @dataclass(frozen=True)
 class FeatureSnapshot:
@@ -53,6 +59,35 @@ class SystemInfo:
 
     def __init__(self, registry: RegistryOps | None = None) -> None:
         self._registry = registry or RegistryOps(dry_run=False)
+
+    @staticmethod
+    def _bool_value(value: Any) -> bool | None:
+        """Normalize common WMI/CIM bool representations."""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int):
+            return bool(value)
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "yes", "1"}:
+                return True
+            if normalized in {"false", "no", "0"}:
+                return False
+        return None
+
+    @staticmethod
+    def _as_list(value: Any) -> list[Any]:
+        """Convert COM SAFEARRAY / CIM array values into plain Python lists."""
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        if isinstance(value, tuple):
+            return list(value)
+        try:
+            return list(value)
+        except TypeError:
+            return [value]
 
     # ------------------------------------------------------------------
     # Low-level helpers
@@ -78,7 +113,7 @@ class SystemInfo:
         returned = wt.ULONG(0)
         status = ntdll.NtQuerySystemInformation(
             wt.ULONG(info_class),
-            ctypes.byref(buffer),
+            ctypes.cast(buffer, wt.LPVOID),
             wt.ULONG(size),
             ctypes.byref(returned),
         )
@@ -89,54 +124,165 @@ class SystemInfo:
             return None
         return buffer.raw[: returned.value or size]
 
+    def _wmi_first(
+        self, namespace: str, query: str, properties: tuple[str, ...]
+    ) -> dict[str, Any] | None:
+        """Return selected fields from the first COM WMI row."""
+        if not self.is_windows():
+            return None
+        try:
+            import pythoncom  # type: ignore[import-not-found]
+            import win32com.client  # type: ignore[import-not-found]
+        except ImportError as exc:  # pragma: no cover - Windows-only dependency
+            logger.debug("pywin32 WMI COM support is unavailable: %s", exc)
+            return None
+        com_initialized = False
+        row: dict[str, Any] | None = None
+        locator: Any | None = None
+        service: Any | None = None
+        items: Any | None = None
+        item: Any | None = None
+        try:
+            pythoncom.CoInitialize()
+            com_initialized = True
+            locator = win32com.client.Dispatch("WbemScripting.SWbemLocator")
+            service = locator.ConnectServer(".", namespace)
+            items = service.ExecQuery(query)
+            for item in items:
+                row = {name: getattr(item, name, None) for name in properties}
+                break
+        except Exception as exc:  # pragma: no cover - Windows-only
+            logger.debug("WMI query failed (%s): %s", namespace, exc)
+        finally:
+            item = None
+            items = None
+            service = None
+            locator = None
+            if com_initialized:
+                pythoncom.CoUninitialize()
+        return row
+
+    def _run_powershell(
+        self, command: str, timeout: int = 20
+    ) -> subprocess.CompletedProcess[str] | None:
+        """Run a fixed PowerShell probe without invoking a shell."""
+        if not self.is_windows():
+            return None
+        try:
+            return subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    command,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.debug("PowerShell probe failed: %s", exc)
+            return None
+
+    def _powershell_json(self, command: str, timeout: int = 20) -> dict[str, Any]:
+        """Return the first JSON object emitted by a fixed PowerShell probe."""
+        result = self._run_powershell(command, timeout=timeout)
+        if result is None or result.returncode != 0:
+            return {}
+        payload = (result.stdout or "").strip()
+        if not payload:
+            return {}
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            logger.debug("PowerShell JSON parse failed: %s", exc)
+            return {}
+        if isinstance(data, list):
+            first = data[0] if data else {}
+            return first if isinstance(first, dict) else {}
+        return data if isinstance(data, dict) else {}
+
+    def _processor_info(self) -> dict[str, Any]:
+        """Return selected ``Win32_Processor`` fields via COM or CIM."""
+        item = self._wmi_first(
+            ROOT_CIMV2_NAMESPACE,
+            "SELECT Manufacturer, VirtualizationFirmwareEnabled, "
+            "SecondLevelAddressTranslationExtensions FROM Win32_Processor",
+            (
+                "Manufacturer",
+                "VirtualizationFirmwareEnabled",
+                "SecondLevelAddressTranslationExtensions",
+            ),
+        )
+        if item is not None:
+            return item
+        return self._powershell_json(
+            "Get-CimInstance -ClassName Win32_Processor | "
+            "Select-Object -First 1 Manufacturer,VirtualizationFirmwareEnabled,"
+            "SecondLevelAddressTranslationExtensions | ConvertTo-Json -Compress"
+        )
+
+    def _computer_system_info(self) -> dict[str, Any]:
+        """Return selected ``Win32_ComputerSystem`` fields via COM or CIM."""
+        item = self._wmi_first(
+            ROOT_CIMV2_NAMESPACE,
+            "SELECT HypervisorPresent FROM Win32_ComputerSystem",
+            ("HypervisorPresent",),
+        )
+        if item is not None:
+            return item
+        return self._powershell_json(
+            "Get-CimInstance -ClassName Win32_ComputerSystem | "
+            "Select-Object -First 1 HypervisorPresent | ConvertTo-Json -Compress"
+        )
+
     def _wmi_device_guard(self) -> dict[str, Any]:
         """Return a dict view of ``Win32_DeviceGuard`` (empty on failure)."""
         if not self.is_windows():
             return {}
-        try:
-            import wmi  # type: ignore[import-not-found]
-        except ImportError:
-            try:
-                import win32com.client  # type: ignore[import-not-found]
-            except ImportError:  # pragma: no cover - Windows-only
-                return {}
-            locator = win32com.client.Dispatch("WbemScripting.SWbemLocator")
-            service = locator.ConnectServer(
-                ".", "root\\Microsoft\\Windows\\DeviceGuard"
-            )
-            items = service.ExecQuery("SELECT * FROM Win32_DeviceGuard")
-            for item in items:
-                return {
-                    "VirtualizationBasedSecurityStatus": getattr(
-                        item, "VirtualizationBasedSecurityStatus", 0
-                    ),
-                    "SecurityServicesConfigured": list(
-                        getattr(item, "SecurityServicesConfigured", []) or []
-                    ),
-                    "SecurityServicesRunning": list(
-                        getattr(item, "SecurityServicesRunning", []) or []
-                    ),
-                }
+        item = self._wmi_first(
+            DEVICE_GUARD_NAMESPACE,
+            "SELECT VirtualizationBasedSecurityStatus, SecurityServicesConfigured, "
+            "SecurityServicesRunning FROM Win32_DeviceGuard",
+            (
+                "VirtualizationBasedSecurityStatus",
+                "SecurityServicesConfigured",
+                "SecurityServicesRunning",
+            ),
+        )
+        if item is not None:
+            return {
+                "VirtualizationBasedSecurityStatus": item.get(
+                    "VirtualizationBasedSecurityStatus", 0
+                )
+                or 0,
+                "SecurityServicesConfigured": self._as_list(
+                    item.get("SecurityServicesConfigured")
+                ),
+                "SecurityServicesRunning": self._as_list(item.get("SecurityServicesRunning")),
+            }
+        data = self._powershell_json(
+            "Get-CimInstance -Namespace 'root\\Microsoft\\Windows\\DeviceGuard' "
+            "-ClassName Win32_DeviceGuard | Select-Object -First 1 "
+            "VirtualizationBasedSecurityStatus,SecurityServicesConfigured,"
+            "SecurityServicesRunning | ConvertTo-Json -Compress"
+        )
+        if not data:
             return {}
-
-        try:
-            connection = wmi.WMI(namespace="root\\Microsoft\\Windows\\DeviceGuard")
-            for item in connection.Win32_DeviceGuard():
-                return {
-                    "VirtualizationBasedSecurityStatus": getattr(
-                        item, "VirtualizationBasedSecurityStatus", 0
-                    )
-                    or 0,
-                    "SecurityServicesConfigured": list(
-                        getattr(item, "SecurityServicesConfigured", []) or []
-                    ),
-                    "SecurityServicesRunning": list(
-                        getattr(item, "SecurityServicesRunning", []) or []
-                    ),
-                }
-        except Exception as exc:  # pragma: no cover - Windows-only
-            logger.warning("WMI DeviceGuard query failed: %s", exc)
-        return {}
+        return {
+            "VirtualizationBasedSecurityStatus": data.get(
+                "VirtualizationBasedSecurityStatus", 0
+            )
+            or 0,
+            "SecurityServicesConfigured": self._as_list(
+                data.get("SecurityServicesConfigured")
+            ),
+            "SecurityServicesRunning": self._as_list(data.get("SecurityServicesRunning")),
+        }
 
     # ------------------------------------------------------------------
     # Feature-level detection (1..14)
@@ -145,30 +291,26 @@ class SystemInfo:
     def virtualization_enabled(self) -> bool:
         """#1 — Hardware VT-x / AMD-V status.
 
-        Mirrors what Task Manager (Performance » CPU) reports: when the Windows
-        hypervisor is loaded it consumes the firmware virtualization bit and
-        ``Win32_Processor.VirtualizationFirmwareEnabled`` returns ``False``.
-        In that case the presence of the hypervisor itself proves virtualization
-        is enabled in firmware, so we treat ``HypervisorPresent`` as a
-        positive signal too.
+        Mirrors the canonical CIM property used by Windows tooling:
+        ``Win32_Processor.VirtualizationFirmwareEnabled``. Hypervisor runtime
+        state is intentionally not used as a substitute because this diagnostic
+        must reflect the BIOS/UEFI switch itself.
         """
         if not self.is_windows():
             return False
-        if self.hypervisor_present():
-            return True
-        try:
-            import wmi  # type: ignore[import-not-found]
-
-            cpu = next(iter(wmi.WMI().Win32_Processor()), None)
-            if cpu is None:
-                return False
-            if bool(getattr(cpu, "VirtualizationFirmwareEnabled", False)):
-                return True
-            # SLAT support strongly implies virt extensions are usable.
-            return bool(getattr(cpu, "SecondLevelAddressTranslationExtensions", False))
-        except Exception as exc:  # pragma: no cover - Windows-only
-            logger.debug("Win32_Processor query failed: %s", exc)
+        value = self._bool_value(
+            self._processor_info().get("VirtualizationFirmwareEnabled")
+        )
+        if value is not None:
+            return value
+        result = self._run_powershell(
+            "Get-CimInstance -ClassName Win32_Processor | "
+            "Select-Object -ExpandProperty VirtualizationFirmwareEnabled"
+        )
+        if result is None or result.returncode != 0:
             return False
+        parsed = self._bool_value((result.stdout or "").strip())
+        return bool(parsed)
 
     def wmi_healthy(self) -> bool:
         """#2 — WMI repository health.
@@ -179,43 +321,15 @@ class SystemInfo:
         """
         if not self.is_windows():
             return False
-        # Preferred path: direct WMI/COM call.
-        try:
-            import wmi  # type: ignore[import-not-found]
-
-            result = next(iter(wmi.WMI().Win32_OperatingSystem()), None)
-            if result is not None and getattr(result, "Caption", None):
-                return True
-        except Exception as exc:  # pragma: no cover - Windows-only
-            logger.debug("WMI COM probe failed: %s", exc)
-        # Fallback via win32com (when the ``wmi`` package is missing).
-        try:
-            import win32com.client  # type: ignore[import-not-found]
-
-            locator = win32com.client.Dispatch("WbemScripting.SWbemLocator")
-            service = locator.ConnectServer(".", "root\\cimv2")
-            items = service.ExecQuery("SELECT Caption FROM Win32_OperatingSystem")
-            for item in items:
-                if getattr(item, "Caption", None):
-                    return True
-        except Exception as exc:  # pragma: no cover - Windows-only
-            logger.debug("win32com WMI probe failed: %s", exc)
-        # Last-resort PowerShell fallback (wmic is no longer guaranteed).
-        try:
-            result = subprocess.run(
-                [
-                    "powershell",
-                    "-NoProfile",
-                    "-Command",
-                    "(Get-CimInstance Win32_OperatingSystem).Caption",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=20,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            logger.warning("WMI PowerShell probe failed: %s", exc)
+        item = self._wmi_first(
+            ROOT_CIMV2_NAMESPACE,
+            "SELECT Caption FROM Win32_OperatingSystem",
+            ("Caption",),
+        )
+        if item is not None and item.get("Caption"):
+            return True
+        result = self._run_powershell("(Get-CimInstance Win32_OperatingSystem).Caption")
+        if result is None:
             return False
         return result.returncode == 0 and bool((result.stdout or "").strip())
 
@@ -311,16 +425,7 @@ class SystemInfo:
         """Return the CPU vendor string (``GenuineIntel``, ``AuthenticAMD``...)."""
         if not self.is_windows():
             return ""
-        try:
-            import wmi  # type: ignore[import-not-found]
-
-            cpu = next(iter(wmi.WMI().Win32_Processor()), None)
-            if cpu is None:
-                return ""
-            return str(getattr(cpu, "Manufacturer", "") or "").strip()
-        except Exception as exc:  # pragma: no cover - Windows-only
-            logger.debug("CPU vendor query failed: %s", exc)
-            return ""
+        return str(self._processor_info().get("Manufacturer", "") or "").strip()
 
     def kva_shadow_state(self) -> str:
         """#7 — KVA Shadow status with hardware-vulnerability awareness.
@@ -360,16 +465,7 @@ class SystemInfo:
         """#8 — Windows hypervisor currently running."""
         if not self.is_windows():
             return False
-        try:
-            import wmi  # type: ignore[import-not-found]
-
-            info = next(iter(wmi.WMI().Win32_ComputerSystem()), None)
-            if info is None:
-                return False
-            return bool(getattr(info, "HypervisorPresent", False))
-        except Exception as exc:  # pragma: no cover
-            logger.debug("Hypervisor probe failed: %s", exc)
-            return False
+        return bool(self._bool_value(self._computer_system_info().get("HypervisorPresent")))
 
     def faceit_present(self) -> bool:
         """#9 — FACEIT filter currently loaded."""
@@ -380,8 +476,14 @@ class SystemInfo:
                 ["fltmc"], capture_output=True, text=True, timeout=15, check=False
             )
         except (OSError, subprocess.SubprocessError):
-            return False
-        return "faceit" in (result.stdout or "").lower()
+            result = None
+        if result is not None and "faceit" in (result.stdout or "").lower():
+            return True
+        for service_name in FACEIT_SERVICE_NAMES:
+            output = self._sc_query(service_name)
+            if output is not None and "running" in output.lower():
+                return True
+        return False
 
     def windows_hello_enabled(self) -> bool:
         """#10 — Windows Hello protection.
@@ -437,7 +539,8 @@ class SystemInfo:
                 "SecureBiometrics",
             ),
             (
-                r"HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\WindowsHelloSecureBiometrics",
+                r"HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios"
+                r"\WindowsHelloSecureBiometrics",
                 "Enabled",
             ),
         ]
@@ -468,7 +571,12 @@ class SystemInfo:
         if result is None:
             return "Unknown"
         _, value = result
-        return {0: "Off", 1: "On", 2: "Monitoring"}.get(int(value), "Unknown")
+        try:
+            state = int(value)
+        except (TypeError, ValueError):
+            logger.debug("Unexpected Smart App Control value: %r", value)
+            return "Unknown"
+        return {0: "Off", 1: "On", 2: "Monitoring"}.get(state, "Unknown")
 
     def bitlocker_active(self, drive: str = "C:") -> bool:
         """#14 — Any protector active on ``drive``."""
@@ -495,17 +603,10 @@ class SystemInfo:
         """True when the FACEIT service exists in the SCM (whether or not running)."""
         if not self.is_windows():
             return False
-        try:
-            result = subprocess.run(
-                ["sc", "query", "FACEIT"],
-                capture_output=True,
-                text=True,
-                timeout=15,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return False
-        return result.returncode == 0
+        return any(
+            self._sc_query(service_name) is not None
+            for service_name in FACEIT_SERVICE_NAMES
+        )
 
     def faceit_status(self) -> str:
         """Return ``"Active"``, ``"Disabled"`` or ``"Not Installed"`` for FACEIT."""
@@ -530,8 +631,16 @@ class SystemInfo:
         hyper = _yn(self.hypervisor_present())
 
         return [
-            FeatureSnapshot(1, "Virtualization (VT-x/SVM)", _yn(self.virtualization_enabled(), on="Enabled", off="Disabled")),
-            FeatureSnapshot(2, "WMI (WinMgmt)", _yn(self.wmi_healthy(), on="Active", off="Failed")),
+            FeatureSnapshot(
+                1,
+                "Virtualization (VT-x/SVM)",
+                _yn(self.virtualization_enabled(), on="Enabled", off="Disabled"),
+            ),
+            FeatureSnapshot(
+                2,
+                "WMI (WinMgmt)",
+                _yn(self.wmi_healthy(), on="Functional", off="Failed"),
+            ),
             FeatureSnapshot(3, "VBS (Virt-Based Security)", vbs_label),
             FeatureSnapshot(4, "HVCI (Memory Integrity)", _yn(self.hvci_active())),
             FeatureSnapshot(5, "Credential Guard", cg),
@@ -543,7 +652,11 @@ class SystemInfo:
             FeatureSnapshot(11, "Secure Biometrics", _yn(self.secure_biometrics_enabled())),
             FeatureSnapshot(12, "HyperGuard / Sys Guard", _yn(self.hyperguard_enabled())),
             FeatureSnapshot(13, "Smart App Control", sac),
-            FeatureSnapshot(14, "BitLocker", _yn(self.bitlocker_active(), on="Active", off="Suspended")),
+            FeatureSnapshot(
+                14,
+                "BitLocker",
+                _yn(self.bitlocker_active(), on="Active", off="Suspended"),
+            ),
         ]
 
     # ------------------------------------------------------------------
@@ -559,6 +672,23 @@ class SystemInfo:
             return int(data) != 0
         except (TypeError, ValueError):
             return bool(data)
+
+    def _sc_query(self, service_name: str) -> str | None:
+        if not self.is_windows():
+            return None
+        try:
+            result = subprocess.run(
+                ["sc", "query", service_name],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if result.returncode != 0:
+            return None
+        return result.stdout
 
 
 __all__ = ["FeatureSnapshot", "SystemInfo"]

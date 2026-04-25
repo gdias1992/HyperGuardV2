@@ -10,14 +10,14 @@ describe:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class OperationStatus(str, Enum):
+class OperationStatus(StrEnum):
     """Outcome of a single service operation."""
 
     SUCCESS = "success"
@@ -27,7 +27,7 @@ class OperationStatus(str, Enum):
     DRY_RUN = "dry_run"
 
 
-class RegistryValueType(str, Enum):
+class RegistryValueType(StrEnum):
     """Subset of ``winreg`` value types we write."""
 
     REG_DWORD = "REG_DWORD"
@@ -59,7 +59,7 @@ class BackupEntry(BaseModel):
         ..., description="Whether the value existed prior to mutation."
     )
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         description="UTC timestamp when the backup was captured.",
     )
 
@@ -106,7 +106,7 @@ class OperationResult(BaseModel):
         default_factory=list, description="Backups captured while executing this step."
     )
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
     )
 
     @property
