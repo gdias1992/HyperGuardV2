@@ -97,7 +97,7 @@ INITIAL_FEATURES: list[Feature] = [
     ),
     Feature(
         id=6,
-        name="Driver Signature Enf.",
+        name="Driver Signature Enforcement",
         target="Disabled",
         scope="Boot",
         status="Active",

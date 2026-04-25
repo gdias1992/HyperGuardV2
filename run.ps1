@@ -1,2 +1,2 @@
-.\.venv\Scripts\Activate.ps
+.\.venv\Scripts\Activate.bat
 python -m src

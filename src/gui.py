@@ -10,6 +10,7 @@ this module is responsible for composition and event streaming only.
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime
 from typing import Literal
 
@@ -155,10 +156,10 @@ async def _run_preflight() -> None:
 def _pill_classes(status: str, target: str) -> str:
     """Tailwind classes for the status pill, matching the React mock palette."""
     base = "px-2 py-0.5 rounded text-[10px] uppercase font-bold tracking-wider border"
-    if status == target or status in {"Disabled", "Suspended", "Removed"}:
+    if status in {"Disabled", "Suspended", "Removed"}:
+        return f"{base} bg-red-500/10 text-red-400 border-red-500/20"
+    if status == "Active" or status == target:
         return f"{base} bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-    if status == "Active":
-        return f"{base} bg-amber-500/10 text-amber-400 border-amber-500/20"
     if status == "Monitoring":
         return f"{base} bg-white/10 text-white border-white/20"
     return f"{base} bg-zinc-800 text-zinc-400 border-zinc-700"
@@ -331,6 +332,18 @@ def system_profile_panel() -> None:
         ).props("flat no-caps")
 
 
+async def _copy_logs() -> None:
+    """Copy all execution log lines to the user's clipboard."""
+    payload = "\n".join(state.logs)
+    escaped = json.dumps(payload)
+    try:
+        await ui.run_javascript(f"navigator.clipboard.writeText({escaped})")
+        ui.notify("Logs copied to clipboard", type="positive", position="bottom")
+    except Exception as exc:  # pragma: no cover - depends on browser env
+        _logger.warning("Clipboard copy failed: %s", exc)
+        ui.notify("Could not copy logs", type="negative", position="bottom")
+
+
 @ui.refreshable
 def logs_panel() -> None:
     """Terminal-style log output."""
@@ -340,27 +353,41 @@ def logs_panel() -> None:
             ui.label("Live output of system modifications.").classes(
                 "text-sm text-zinc-400"
             )
-        if state.is_processing:
-            with ui.row().classes(
-                "items-center gap-3 bg-zinc-900 border border-zinc-800 "
-                "px-4 py-2 rounded-lg no-wrap"
-            ):
-                ui.label("Running...").classes(
-                    "text-xs text-white mono animate-pulse"
-                )
-                with ui.element("div").classes(
-                    "w-24 h-1.5 bg-zinc-800 rounded-full overflow-hidden"
+        with ui.row().classes("items-center gap-3 no-wrap"):
+            copy_btn = ui.button(
+                "Copy",
+                icon="content_copy",
+                on_click=_copy_logs,
+            ).classes(
+                "px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-900 "
+                "hover:bg-zinc-800 text-white border border-white/10"
+            ).props("flat no-caps dense")
+            if not state.logs:
+                copy_btn.disable()
+            if state.is_processing:
+                with ui.row().classes(
+                    "items-center gap-3 bg-zinc-900 border border-zinc-800 "
+                    "px-4 py-2 rounded-lg no-wrap"
                 ):
-                    ui.element("div").classes(
-                        "h-full bg-white transition-all duration-300"
-                    ).style(f"width: {state.progress}%")
+                    ui.label("Running...").classes(
+                        "text-xs text-white mono animate-pulse"
+                    )
+                    with ui.element("div").classes(
+                        "w-24 h-1.5 bg-zinc-800 rounded-full overflow-hidden"
+                    ):
+                        ui.element("div").classes(
+                            "h-full bg-white transition-all duration-300"
+                        ).style(f"width: {state.progress}%")
 
     with ui.element("div").classes(
         "flex-1 bg-[#0a0a0c] border border-zinc-800 rounded-xl mono text-xs "
-        "p-4 overflow-y-auto shadow-inner custom-scrollbar w-full min-h-0"
-    ):
+        "p-4 overflow-y-auto shadow-inner custom-scrollbar w-full min-h-0 "
+        "select-text cursor-text"
+    ).style("user-select: text; -webkit-user-select: text"):
         for line in state.logs:
-            ui.label(line).classes(f"mb-1.5 leading-relaxed {_log_color(line)}")
+            ui.label(line).classes(
+                f"mb-1.5 leading-relaxed select-text {_log_color(line)}"
+            ).style("user-select: text; -webkit-user-select: text")
         if not state.is_processing and state.logs:
             ui.label("_").classes("mt-4 text-zinc-600 animate-pulse")
 
