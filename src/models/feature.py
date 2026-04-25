@@ -54,7 +54,7 @@ INITIAL_FEATURES: list[Feature] = [
     ),
     Feature(
         id=3,
-        name="VBS (Virt-Based Security)",
+        name="VBS (Virtualization Based Security)",
         target="Disabled",
         scope="Registry/UEFI",
         status="Active",
