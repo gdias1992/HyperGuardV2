@@ -17,7 +17,7 @@ from typing import Literal
 
 from nicegui import ui
 
-from src.models import Feature, clone_features
+from src.models import Feature, clone_features, get_feature_detail
 from src.models.state import OperationResult, OperationStatus
 from src.services.preflight import PreflightReport
 from src.services.system_info import FeatureSnapshot, SystemInfo
@@ -72,6 +72,16 @@ EXTRA_HEAD = """
     border:1px solid rgba(255,255,255,.10) !important;
     padding:12px !important; border-radius:12px !important;
     line-height:1.5 !important; }
+    .feature-detail-markdown { color:#d4d4d8; }
+    .feature-detail-markdown h2 { margin:20px 0 10px; color:#fff;
+        font-size:15px; font-weight:800; line-height:1.3; }
+    .feature-detail-markdown h2:first-child { margin-top:0; }
+    .feature-detail-markdown ul { margin:0; padding-left:18px; }
+    .feature-detail-markdown li { margin:8px 0; line-height:1.6; }
+    .feature-detail-markdown code { background:#18181b; color:#f4f4f5;
+        border:1px solid rgba(255,255,255,.08); border-radius:6px;
+        padding:1px 5px; font-family:'JetBrains Mono','Consolas',monospace;
+        font-size:12px; }
   /* Hide default NiceGUI page padding */
   .q-page { padding: 0 !important; }
   .nicegui-content > .q-page-container > .q-page { padding: 0 !important; }
@@ -100,6 +110,7 @@ class AppState:
         self.reboot_pending: bool = False
         self.is_loading_features: bool = False
         self.hidden_toggle_feature_ids: set[int] = set()
+        self.detail_feature_id: int | None = None
         self._active_task: asyncio.Task[None] | None = None
 
     def add_log(self, msg: str) -> None:
@@ -264,6 +275,110 @@ def _optimizations_applied() -> int:
     )
 
 
+def _selected_detail_feature() -> Feature | None:
+    """Return the feature currently selected for the detail modal."""
+    if state.detail_feature_id is None:
+        return None
+    return next(
+        (feature for feature in state.features if feature.id == state.detail_feature_id),
+        None,
+    )
+
+
+def _markdown_bullets(items: tuple[str, ...]) -> str:
+    return "\n".join(f"- {item}" for item in items)
+
+
+def _feature_detail_markdown(feature: Feature) -> str:
+    """Return markdown-style detail content for ``feature``."""
+    detail = get_feature_detail(feature)
+    sections = (
+        ("🧪 Feature Explanation", detail.explanation),
+        ("📡 Hardware/Software Verification", detail.verification),
+        ("🔧 Manual Enablement", detail.enablement),
+        ("🛠️ Manual Disablement", detail.disablement),
+    )
+    return "\n\n".join(
+        f"## {title}\n{_markdown_bullets(items)}" for title, items in sections
+    )
+
+
+def _detail_state_chip(
+    label: str,
+    value: str,
+    value_classes: str,
+    container_classes: str,
+) -> None:
+    with ui.column().classes(
+        f"gap-1 rounded-lg border p-3 bg-zinc-950/75 min-w-0 {container_classes}"
+    ):
+        ui.label(label).classes(
+            "text-[9px] uppercase tracking-widest text-zinc-500 font-bold"
+        )
+        ui.label(value).classes(f"text-sm font-semibold break-words {value_classes}")
+
+
+@ui.refreshable
+def feature_detail_content() -> None:
+    """Refreshable body for the reusable feature detail modal."""
+    feature = _selected_detail_feature()
+    with ui.column().classes("gap-0 w-full min-w-0"):
+        with ui.row().classes(
+            "items-start justify-between gap-4 w-full p-5 border-b border-white/10 no-wrap"
+        ):
+            with ui.column().classes("gap-2 min-w-0"):
+                ui.label("Feature Detail").classes(
+                    "text-[10px] uppercase tracking-widest text-zinc-500 font-bold"
+                )
+                if feature is None:
+                    ui.label("No feature selected").classes(
+                        "text-xl font-bold text-white leading-tight"
+                    )
+                else:
+                    ui.label(feature.name).classes(
+                        "text-2xl font-bold text-white leading-tight"
+                    )
+                    ui.label(feature.desc).classes(
+                        "text-sm text-zinc-400 leading-relaxed max-w-3xl"
+                    )
+            ui.button("X", on_click=feature_detail_dialog.close).classes(
+                "w-9 h-9 min-w-9 rounded-full bg-zinc-900 hover:bg-zinc-800 "
+                "text-zinc-300 hover:text-white border border-white/10 shrink-0"
+            ).props("flat dense")
+
+        if feature is None:
+            return
+
+        with ui.element("div").classes(
+            "grid grid-cols-1 md:grid-cols-3 gap-2 w-full p-5 border-b border-white/10"
+        ):
+            _detail_state_chip(
+                "Pirate State",
+                feature.pirate_state,
+                "text-red-300",
+                "border-red-500/20",
+            )
+            _detail_state_chip(
+                "Defender State",
+                feature.defender_state,
+                "text-emerald-300",
+                "border-emerald-500/20",
+            )
+            _detail_state_chip(
+                "Current State",
+                feature.status,
+                "text-zinc-100",
+                "border-white/10",
+            )
+
+        with ui.element("div").classes(
+            "p-5 overflow-y-auto custom-scrollbar bg-black/20"
+        ).style("max-height: 58vh"):
+            ui.markdown(_feature_detail_markdown(feature)).classes(
+                "feature-detail-markdown"
+            )
+
+
 # ---------------------------------------------------------------------------
 # Refreshable UI fragments — re-rendered when state mutates
 # ---------------------------------------------------------------------------
@@ -303,7 +418,12 @@ def feature_matrix() -> None:
 
 
 def _feature_card(feature: Feature) -> None:
-    with ui.element("div").classes(_feature_card_classes(feature)):
+    with ui.element("div").classes(
+        f"{_feature_card_classes(feature)} cursor-pointer"
+    ).on(
+        "dblclick",
+        lambda _event, selected_feature=feature: _open_feature_detail(selected_feature),
+    ):
         # --- Header row -----------------------------------------------------
         with ui.row().classes("justify-between items-start mb-5 w-full no-wrap"):
             with ui.column().classes("gap-2 pr-4 grow min-w-0"):
@@ -342,6 +462,8 @@ def _feature_card(feature: Feature) -> None:
                     value=feature.status in ACTIVE_FEATURE_STATUSES,
                     on_change=lambda _e, fid=feature.id: _toggle_feature(fid),
                 ).classes("shrink-0")
+                switch.on("click", js_handler="(event) => event.stopPropagation()")
+                switch.on("dblclick", js_handler="(event) => event.stopPropagation()")
                 if switch_disabled:
                     switch.disable()
 
@@ -584,6 +706,12 @@ def _switch_tab(tab: str) -> None:
     sidebar_nav.refresh()
 
 
+def _open_feature_detail(feature: Feature) -> None:
+    state.detail_feature_id = feature.id
+    feature_detail_content.refresh()
+    feature_detail_dialog.open()
+
+
 def _toggle_feature(feature_id: int) -> None:
     for f in state.features:
         if f.id != feature_id or f.locked:
@@ -768,6 +896,7 @@ def _finalize_workflow(
 hello_dialog: ui.dialog
 bitlocker_dialog: ui.dialog
 reboot_dialog: ui.dialog
+feature_detail_dialog: ui.dialog
 
 
 def _trigger_reboot() -> None:
@@ -783,7 +912,14 @@ def _trigger_reboot() -> None:
 
 
 def _build_modals() -> None:
-    global hello_dialog, bitlocker_dialog, reboot_dialog
+    global hello_dialog, bitlocker_dialog, reboot_dialog, feature_detail_dialog
+
+    # --- Feature detail modal ---------------------------------------------
+    with ui.dialog() as feature_detail_dialog, ui.card().classes(
+        "bg-zinc-950 border border-white/10 rounded-2xl shadow-2xl "
+        "w-[92vw] max-w-4xl max-h-[86vh] p-0 gap-0 overflow-hidden"
+    ):
+        feature_detail_content()
 
     # --- Windows Hello reset modal -----------------------------------------
     with ui.dialog() as hello_dialog, ui.card().classes(

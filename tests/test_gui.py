@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from src.gui import _feature_card_classes, _feature_toggle_visible, state
-from src.models.feature import Feature
+from src.gui import (
+    _feature_card_classes,
+    _feature_detail_markdown,
+    _feature_toggle_visible,
+    state,
+)
+from src.models.feature import FEATURE_DETAILS, INITIAL_FEATURES, Feature
 
 
 def _feature(
@@ -51,3 +56,19 @@ def test_hidden_toggle_feature_hides_toggle(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(state, "hidden_toggle_feature_ids", {7})
 
     assert _feature_toggle_visible(feature) is False
+
+
+def test_all_initial_features_have_detail_content() -> None:
+    assert {feature.id for feature in INITIAL_FEATURES} == set(FEATURE_DETAILS)
+
+
+def test_feature_detail_markdown_has_required_sections() -> None:
+    feature = INITIAL_FEATURES[2]
+
+    markdown = _feature_detail_markdown(feature)
+
+    assert "## 🧪 Feature Explanation" in markdown
+    assert "## 📡 Hardware/Software Verification" in markdown
+    assert "## 🔧 Manual Enablement" in markdown
+    assert "## 🛠️ Manual Disablement" in markdown
+    assert "Win32_DeviceGuard" in markdown
